@@ -10,7 +10,7 @@ import "./ListItem.css"
 const ListItem = (props) => {
   const { id, title, data, maindata, setData,loginOpen } = props;
   const [opened, { open, close }] = useDisclosure(false);
-
+  
   return (
     <Droppable droppableId={id} index={title} key={id}>
       {(provided) => (

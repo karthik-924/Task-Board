@@ -1,127 +1,226 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const { Client } = require('pg');
+const express = require("express");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const { Sequelize, DataTypes } = require("sequelize");
 
 const app = express();
 const port = process.env.PORT || 3000;
-const dbport = process.env.PORT || 5432;
-const password = process.env.PASSWORD || 'Emm@karthik924';
+const dbport = process.env.DB_PORT || 5432; // Fix the variable name
+const password = process.env.DB_PASSWORD || "Emm@karthik924"; // Fix the variable name
 
-const client = new Client({
-    host: 'localhost',
-    user: 'postgres',
-    port: dbport,
-    password: password,
-    database: 'postgres'
+const sequelize = new Sequelize("postgres", "postgres", password, {
+  host: "localhost",
+  port: dbport,
+  dialect: "postgres",
 });
 
-client.connect().then(() => {
-    console.log('Connected to database');
-}).catch((err) => {
-    console.log('Error connecting to database', err);
-});
+const User = sequelize.define(
+  "users",
+  {
+    id: {
+      type: DataTypes.STRING,
+      primaryKey: true,
+    },
+    username: DataTypes.STRING,
+    password: DataTypes.STRING,
+  },
+  { timestamps: false, freezeTableName: true }
+);
+
+User.sync();
+
+const taskboard = sequelize.define(
+  "taskboard",
+  {
+    id: {
+      type: DataTypes.STRING,
+      primaryKey: true,
+    },
+    name: DataTypes.STRING,
+    userId: {
+      type: DataTypes.STRING,
+      field: 'userid',
+    },
+  },
+  { timestamps: false, freezeTableName: true }
+);
+
+taskboard.sync();
+
+const Task = sequelize.define(
+  "task",
+  {
+    name: DataTypes.STRING,
+    status: DataTypes.BOOLEAN,
+    id: {
+      type: DataTypes.STRING,
+      primaryKey: true,
+    },
+    taskboardId: {
+      type: DataTypes.STRING,
+      field: 'taskboardid',
+    },
+  },
+  { timestamps: false, freezeTableName: true }
+);
+
+Task.sync();
+
+User.hasMany(taskboard, { foreignKey: 'userid' });
+taskboard.belongsTo(User, { foreignKey: 'userid' });
+taskboard.hasMany(Task, { foreignKey: 'taskboardid' });
+Task.belongsTo(taskboard, { foreignKey: 'taskboardid' });
+
+sequelize.sync();
 
 app.use(bodyParser.json());
 app.use(cors());
 
-// Define your routes and logic here
 
-app.post('/login', (req, res) => {
-    const { username, password } = req.body;
-    client.query(`SELECT id FROM users WHERE username='${username}' AND password='${password}'`).then((result) => {
-        if (result.rows.length > 0) {
-            res.status(200).send({ success: true, message: 'Login successful', id: result.rows[0].id });
-        }
-        else {
-            res.status(400).send({ success: false, message: 'Invalid credentials' });
-        }
-    }).catch((err) => {
-        console.log('Error', err);
-        res.status(500).send({ success: false, message: 'Invalid credentials' });
-    });
-})
 
-app.post('/register', (req, res) => {
-    const { username, password, id } = req.body;
-    console.log(username, password, id);
-    client.query(`SELECT id FROM users WHERE username='${username}'`).then((result) => {
-        if (result.rows.length > 0) {
-            res.status(400).send({ success: false, message: 'Username already exists' });
-        }
-    });
-    client.query(`INSERT INTO users (id, username, password) VALUES ('${id}','${username}', '${password}')`).then((result) => {
-        res.status(200).send({ success: true, message: 'Registration successful' });
-    }).catch((err) => {
-        console.log('Error', err);
-        res.status(500).send({ success: false, message: 'Registration failed' });
-    });
-})
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
 
-app.post('/getTaskboards', async (req, res) => {
-    try {
-        const userId = req.body.userId;
-        const userName = await client.query(`SELECT username FROM users WHERE id='${userId}'`);
-      const taskboardsResult = await client.query(`SELECT * FROM taskboard WHERE userid='${userId}'`);
-      
-      const taskboards = taskboardsResult.rows;
-  
-      const promises = taskboards.map(async (row) => {
-        const tasksResult = await client.query(`SELECT * FROM task WHERE taskboardid='${row.id}'`);
-        row.tasks = tasksResult.rows.length > 0 ? tasksResult.rows : [];
-      });
-  
-      await Promise.all(promises);
-  
-      res.status(200).send({ success: true, message: 'Taskboards fetched', taskboards, userName: userName.rows[0].username });
-    } catch (error) {
-      console.error('Error', error);
-      res.status(400).send({ success: false, message: 'Error fetching taskboards' });
+  try {
+    const user = await User.findOne({ where: { username, password } });
+
+    if (user) {
+      res
+        .status(200)
+        .send({ success: true, message: "Login successful", id: user.id });
+    } else {
+      res.status(400).send({ success: false, message: "Invalid credentials" });
     }
-  });
-  
+  } catch (err) {
+    console.error("Error", err);
+    res.status(500).send({ success: false, message: "Invalid credentials" });
+  }
+});
 
-app.post('/addTaskboard', (req, res) => {
-    const { id, name, userId } = req.body;
-    client.query(`INSERT INTO taskboard (id,name, userid) VALUES ('${id}','${name}', '${userId}')`).then((result) => {
-        res.status(200).send({ success: true, message: 'Taskboard added' });
-    }).catch((err) => {
-        console.log('Error', err);
-        res.status(400).send({ success: false, message: 'Error adding taskboard' });
-    });
-})
+app.post("/register", async (req, res) => {
+  const { id, username, password } = req.body;
 
-app.post('/addTask', (req, res) => {
-    const { id, name, taskboardid } = req.body;
-    client.query(`INSERT INTO task (id,name, taskboardid, status) VALUES ('${id}','${name}', '${taskboardid}','${false}')`).then((result) => {
-        res.status(200).send({ success: true, message: 'Task added' });
-    }).catch((err) => {
-        console.log('Error', err);
-        res.status(400).send({ success: false, message: 'Error adding task' });
-    });
-})
+  try {
+    const existingUser = await User.findOne({ where: { username } });
 
-app.post('/updateTask', (req, res) => {
-    const { id, taskboardid } = req.body;
-    console.log(id, taskboardid);
-    client.query('UPDATE task SET taskboardid = $1 WHERE id = $2', [taskboardid, id]).then((result) => {
-        res.status(200).send({ success: true, message: 'Task updated' });
-    }).catch((err) => {
-        console.log('Error', err);
-        res.status(400).send({ success: false, message: 'Error updating task' });
-    });
-})
+    if (existingUser) {
+      res
+        .status(400)
+        .send({ success: false, message: "Username already exists" });
+    } else {
+      const user = await User.create({ id, username, password });
+      res
+        .status(200)
+        .send({ success: true, message: "Registration successful" });
+    }
+  } catch (err) {
+    console.error("Error", err);
+    res.status(500).send({ success: false, message: "Registration failed" });
+  }
+});
 
-app.post('/updateTaskStatus', (req, res) => {
-    const { id, status } = req.body;
-    client.query(`UPDATE task SET status=${status} WHERE id='${id}'`).then((result) => {
-        res.status(200).send({ success: true, message: 'Task status updated' });
-    }).catch((err) => {
-        console.log('Error', err);
-        res.status(400).send({ success: false, message: 'Error updating task status' });
+app.post("/getTaskboards", async (req, res) => {
+  const userId = req.body.userId;
+
+  try {
+    const user = await User.findByPk(userId);
+
+    if (!user) {
+      res.status(400).send({ success: false, message: "User not found" });
+      return;
+    }
+
+    const taskboards = await taskboard.findAll({ where: { userId: userId } });
+
+    const fetchTasksPromises = taskboards.map(async (taskboard) => {
+      taskboard.dataValues.tasks = await Task.findAll({
+        where: { taskboardId: taskboard.id },
+      });
     });
-})
-        
+
+    await Promise.all(fetchTasksPromises);
+
+    res.status(200).send({
+      success: true,
+      message: "Taskboards fetched",
+      taskboards,
+      userName: user.username,
+    });
+  } catch (error) {
+    console.error("Error", error);
+    res.status(400).send({ success: false, message: "Error fetching taskboards" });
+  }
+});
+
+
+app.post("/addTaskboard", async (req, res) => {
+  const { id, name, userid } = req.body;
+
+  try {
+    const Taskboard = await taskboard.create({ id, name, userid: userid });
+    res.status(200).send({ success: true, message: "Taskboard added" });
+  } catch (err) {
+    console.error("Error", err);
+    res.status(400).send({ success: false, message: "Error adding taskboard" });
+  }
+});
+
+app.post("/addTask", async (req, res) => {
+  const { id, name, taskboardid } = req.body;
+
+  try {
+    const task = await Task.create({
+      id,
+      name,
+      status: false,
+      taskboardid: taskboardid,
+    });
+    res.status(200).send({ success: true, message: "Task added" });
+  } catch (err) {
+    console.error("Error", err);
+    res.status(400).send({ success: false, message: "Error adding task" });
+  }
+});
+
+app.post("/updateTask", async (req, res) => {
+  const { id, taskboardid } = req.body;
+
+  try {
+    const task = await Task.findByPk(id);
+
+    if (task) {
+      task.taskboardid = taskboardid;
+      await task.save();
+      res.status(200).send({ success: true, message: "Task updated" });
+    } else {
+      res.status(400).send({ success: false, message: "Task not found" });
+    }
+  } catch (err) {
+    console.error("Error", err);
+    res.status(400).send({ success: false, message: "Error updating task" });
+  }
+});
+
+app.post("/updateTaskStatus", async (req, res) => {
+  const { id, status } = req.body;
+
+  try {
+    const task = await Task.findByPk(id);
+
+    if (task) {
+      task.status = status;
+      await task.save();
+      res.status(200).send({ success: true, message: "Task status updated" });
+    } else {
+      res.status(400).send({ success: false, message: "Task not found" });
+    }
+  } catch (err) {
+    console.error("Error", err);
+    res
+      .status(400)
+      .send({ success: false, message: "Error updating task status" });
+  }
+});
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
